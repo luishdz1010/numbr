@@ -1,0 +1,13 @@
+{
+  "extends": "../.jshintrc",
+  "expr" : true, // Tolerate `ExpressionStatement` as Programs.
+  "globals" : {
+    /* MOCHA */
+    "describe"   : false,
+    "it"         : false,
+    "before"     : false,
+    "beforeEach" : false,
+    "after"      : false,
+    "afterEach"  : false
+  }
+}
