@@ -1,71 +1,82 @@
 "use strict";
 
 var
-  _ = require('lodash');
-
-var
-  zeroFormat;
+  _ = require('lodash'),
+  consumers = require('./lib/consumers');
 
 var
   autoId = 0,
+  zeroFormat,
+  defaultFormat = '0.0',
   fmtConsumers = {},
   defaultConsumers,
-  formatFn = formatWithCache,
+  compileFn = compileWithCache,
   formatCache = {};
 
-module.exports = numbr;
-
+/**
+ * A wrapper for numeral-like formatting
+ * @param value
+ * @constructor
+ */
 function Numbr(value){
   this.num = value;
 }
 
-Numbr.SIMPLE = 1 << 0;
-Numbr.CURRENCY = 1 << 1;
-Numbr.TIME = 1 << 2;
-
-function InvalidFormatError(a, b){
-
-}
-
-function toFixed(value, exp, roundFn){
-  return decimalAdjust(value, exp, roundFn).toFixed(exp).split('.');
-}
-
-function decimalAdjust(value, exp, roundFn){
-  exp = -exp;
-  value = value.toString().split('e');
-  value = roundFn(+(value[0] + 'e' + (value[1] ? (+value[1] - exp) : -exp)));
-  value = value.toString().split('e');
-  return (+(value[0] + 'e' + (value[1] ? (+value[1] + exp) : exp)));
-}
-
 /**
- * Does the actual formatting.
- * By default the format is compiled into a series of transformations and then cached globally, if you'd like to
- * disable the caching feature, use {@link numbr.setCacheEnabled}.
+ * Formats the wrapped value according to fmt.
+ * By default, the format is compiled into a series of transformations and then cached globally, if you'd like to
+ * disable the caching feature, use {@link numbr.cacheEnabled}.
+ * @param {string} fmt
+ * @param {function} [roundFn=Math.round]
+ * @returns {string} Returns the formatted number
  */
 Numbr.prototype.format = function(fmt, roundFn){
-  return formatFn(fmt, this.num, roundFn);
+  return compileFn(fmt || defaultFormat).run(this.num, roundFn || Math.round);
 };
 
-function format(fmt, num, roundFn){
-  return compileFormat(fmt).run(num, roundFn || Math.round);
-}
+Numbr.prototype.valueOf = function(){
+  return this.num;
+};
 
-function formatWithCache(fmt, num, roundFn){
+Numbr.prototype.value = function(){
+  return this.value;
+};
+
+Numbr.prototype.set = function(num){
+  this.num = num;
+};
+
+Numbr.prototype.clone = function(){
+  return new Numbr(this.num);
+};
+
+/**
+ * Returns a compiled format from the cache or compiles one on the fly.
+ * @private
+ * @param {string} fmt
+ * @returns {CompiledFormat}
+ */
+function compileWithCache(fmt){
   var compiled = formatCache[fmt];
   if(!compiled){
     compiled = formatCache[fmt] = compileFormat(fmt);
   }
-
-  return compiled.run(num, roundFn || Math.round);
+  return compiled;
 }
 
+/**
+ * Compiles the format string.
+ * @private
+ * @param fmt
+ * @returns {CompiledFormat}
+ */
 function compileFormat(fmt){
   var
     state = new ConsumerState(),
     steps = [],
-    opts = {};
+    opts = {
+      pos: {}
+    };
 
   for(var i = 0, len = fmt.length; i < len; ++i){
     var
@@ -82,11 +93,12 @@ function compileFormat(fmt){
     }
 
     if(res.step){
-      if(typeof res.step === 'string'){
-        res.step = identity(res.step);
-      }
       res.step.consumer = res.consumer;
-      steps = steps.concat(res);
+      res.step.consumerId = res.consumer.Id;
+
+      // Cache this step position following a natural order, so that the final output corresponds
+      // to the input string and not the internal weight order
+      opts.pos[res.consumer.Id] = steps.push(res) - 1;
 
       if(res.opts){
         _.extend(opts, res.opts);
@@ -94,22 +106,25 @@ function compileFormat(fmt){
     }
   }
 
-  steps = steps
-    .sort(function(stepA, stepB){
-      return stepA.weight - stepB.weight;
-    }).map(function(step){
-      return step.step;
-    });
+  steps = _(steps)
+    .sortBy('weight')
+    .pluck('step')
+    .value();
 
   return new CompiledFormat(steps, opts);
 }
 
-function identity(value){
-  return function(state, output, pos){
-    output[pos] = value;
-  };
-}
-
+/**
+ * Finds an appropriate consumer object to swallow the current input cursor.
+ *
+ * @private
+ * @param {ConsumerDefinition[]} consumers An array of consumers
+ * @param {ConsumerState} state A consumer state object
+ * @param {string} fmt The format string
+ * @param {number} pos The format string cursor
+ * @returns {StepDefinition|null} Returns an appropriate step definition given by one of the consumers on the
+ * supplied array, if any
+ */
 function consumeInput(consumers, state, fmt, pos){
   for(var i = 0, len = consumers.length; i < len; ++i){
     var
@@ -124,14 +139,29 @@ function consumeInput(consumers, state, fmt, pos){
   }
 }
 
+/**
+ * Simple counter for used consumers during a compile operation.
+ * This can be used by individual consumers to check for other consumers' state.
+ * @private
+ * @constructor
+ */
 function ConsumerState(){
   this.ranConsumers = {};
 }
 
+/**
+ * Returns whether the given consumer id has been used previously during the compile operation.
+ * @param id The consumer Id
+ * @returns {boolean}
+ */
 ConsumerState.prototype.isConsumed = function(id){
   return !!this.ranConsumers[id];
 };
 
+/**
+ * Increments the usage count of the given consumer id
+ * @param id The consumer Id
+ */
 ConsumerState.prototype.incConsumed = function(id){
   if(this.ranConsumers[id]){
     ++this.ranConsumers[id];
@@ -140,251 +170,115 @@ ConsumerState.prototype.incConsumed = function(id){
   }
 };
 
+/**
+ * Returns the total usage count for the given consumer id
+ * @param id The consumer Id
+ * @returns {number}
+ */
 ConsumerState.prototype.timesConsumed = function(id){
   return this.ranConsumers[id] || 0;
 };
 
+/**
+ * A wrapper object for compiled formats.
+ * @param {StepFunction[]} steps An array of step functions to be called during {@link CompiledFormat#run}
+ * @param {object} opts A options object that will be passed to every step function as part of the run state
+ * @constructor
+ */
 function CompiledFormat(steps, opts){
   this.steps = steps;
   this.opts = opts;
+  this.pos = opts.pos;
+
+  delete opts.pos;
 }
 
+/**
+ * Runs all the transformation step functions using the given number and rounding function.
+ * @param num The number to format
+ * @param {function} roundFn A rounding function
+ * @returns {string}
+ */
 CompiledFormat.prototype.run = function(num, roundFn){
   if(num === 0 && zeroFormat){
     return zeroFormat;
   }
 
   var
+    pos = this.pos,
     state = {
-      opts: this.opts,
-      roundFn : roundFn,
       num: num,
-      left: num | 0,
-      right: num % 1
+      right: num % 1,
+      roundFn : roundFn,
+      opts: this.opts,
+      pos: pos
     },
-    output = new Array(this.steps.length);
+    steps = this.steps,
+    len = steps.length,
+    i = 0,
+    output = new Array(len);
 
-  this.steps.forEach(function(step, pos){
-    step(state, output, pos);
-    state[step.consumer.Id] = pos;
-  });
+  state.lang = {
+    ordinal: function (number){
+      var b = number % 10;
+      return (~~(number % 100 / 10) === 1) ? 'th' :
+        (b === 1) ? 'st' :
+          (b === 2) ? 'nd' :
+            (b === 3) ? 'rd' : 'th';
+    },
+    currency: {
+      symbol: '$'
+    }
+  };
+
+  for(; i < len; ++i){
+    var step = steps[i];
+    step(state, output, pos[step.consumerId]);
+  }
 
   return output.join('');
 };
 
-var parenthesisConsumer = {
-  token: '()',
-  consume: function(state, input, pos){
-    if(input[pos] === '('){
-      if(state.timesConsumed(this.Id) === 0){
-        return { step: this.stepLeft , weight: -20 };
-      }
-    } else {
-      if(state.timesConsumed(this.Id) === 1){
-        return { step: this.stepRight, weight: 40 };
-      }
-    }
-  },
-  stepLeft: function(state, output, pos){
-    if(state.num < 0){
-      output[pos] = '(';
-    }
-  },
-  stepRight: function(state, output, pos){
-    if(state.num < 0){
-      var
-        intIndex = state[intConsumer.Id],
-        dotIndex = state[dotConsumer.Id];
 
-      if(output[intIndex]){
-        output[intIndex] = output[intIndex].substr(1);
-      } else if(output[dotIndex]){
-        output[dotIndex] = output[dotIndex].substr(1);
-      }
+/**
+ * Function wrapper for creating new Numbr instances, it also has useful static methods to
+ * control the global module behaviour.
+ * @param {number} value
+ * @returns {Numbr}
+ */
+function numbr(value){
+  return new Numbr(value);
+}
 
-      output[pos] = ')';
-    }
-  }
+/**
+ * Compiles the given string into a {@link CompiledFormat} object ready to be used.
+ * @param {string} fmt
+ * @returns {CompiledFormat}
+ */
+numbr.compile = function(fmt){
+  return compileFn(fmt);
 };
 
-var plusConsumer = {
-  token: '+',
-  consume: function(state){
-    if(!state.isConsumed(this.Id)) {
-      return { step: this.step, weight: -10 };
-    }
-  },
-  step: function(state, output, pos){
-    if(state.num > 0){
-      output[pos] = '+';
-    }
-  }
+numbr.zeroFormat = function(fmt){
+  zeroFormat = _.isString(fmt)? fmt : null;
 };
 
-var dotConsumer = {
-  token: '.[',
-  consume: function(state, input, pos){
-    if(!state.isConsumed(this.Id)){
-      if(input[pos] === '.'){
-        return { step: this.fixedStep, weight: 20 };
-      }
-
-      if(input[pos+1] === '.' && input[pos+2] === ']'){
-        return { step: this.optStep, consumed: 2, weight: 10 };
-      }
-
-      throw new InvalidFormatError(input, pos);
-    }
-  },
-  fixedStep: function(state, output, pos){
-    output[pos] = state.num < 0?
-      (output[state[intConsumer.Id]]? '.' : '-.') : '.';
-  },
-  optStep: function(state, output, pos){
-    if(state.right !== 0){
-      output[pos] = state.num < 0?
-        (output[state[intConsumer.Id]]? '.' : '-.') : '.';
-      state.optionalDot = true;
-    }
-  }
+numbr.defaultFormat = function(fmt){
+  defaultFormat = _.isString(fmt)? fmt : '0.0';
 };
 
-var intConsumer = {
-  token: '0',
-  consume: function(state){
-    if(!state.isConsumed(dotConsumer.Id) && !state.isConsumed(this.Id)){
-      return { step: this.step, weight: 0 };
-    }
-  },
-  step: function(state, output, pos){
-    output[pos] = toFixed(state.num, 0 + (state.opts.decimalPrecision || 0), state.roundFn)[0];
-  }
-};
-
-var sepConsumer = {
-  token: ',',
-  consume: function(state){
-    if(state.isConsumed(intConsumer.Id) && !state.isConsumed(this.Id)){
-      return { step: this.step, weight: 10 };
-    }
-  },
-  step: function(state, output){
-    var intIndex = state[intConsumer.Id];
-
-    // + state.lang.delimiters.thousand
-    output[intIndex] = output[intIndex].replace(/(\d)(?=(\d{3})+(?!\d))/g, '$1' + ',');
-  }
-};
-
-var decimalConsumer = {
-  token: '0[',
-  priority: 10,
-  consume: function(state, input, pos){
-    if(state.isConsumed(dotConsumer.Id) && !state.isConsumed(this.Id)){
-      var
-        precision,
-        optional = 0;
-
-      for(var i = pos, len = input.length; i < len; ++i){
-        var char = input[i];
-        if(char !== '0'){
-          if(char === '['){
-            for(var k = i+1; k < len; ++k){
-              char = input[k];
-              if(char !== '0'){
-                 break;
-              }
-            }
-
-            if(char === ']' && k > i+1){
-              optional = k - i - 1;
-            } else {
-              throw new InvalidFormatError(input, k);
-            }
-          }
-          break;
-        }
-      }
-
-      precision = i + optional - pos;
-
-      var ret = {
-        consumed: i - pos - 1,
-        weight: 30,
-        opts: {
-          decimalPrecision: precision
-        }
-      };
-
-      if(optional > 0){
-        ret.consumed += optional + 2;
-        ret.step = this.optStep.bind(this, precision, optional);
-      } else {
-        ret.step = this.fixedStep.bind(this, precision);
-      }
-      return ret;
-    }
-  },
-  getDotIndex: function(state, output){
-    var dotIndex = state[dotConsumer.Id];
-    // If the decimal separator isn't present, we don't need to output decimals
-    return typeof output[dotIndex] === 'undefined'? false : dotIndex;
-  },
-  setDecimals: function(state, output, pos, dotIndex, decimals){
-
-    if(decimals && decimals.length > 0 && (!state.optionalDot || Number('0.'+decimals) !== 0)){
-      output[pos] = decimals;
-    } else {
-      // Eliminate the decimal point
-      output[dotIndex] = null;
-    }
-  },
-  fixedStep: function(precision, state, output, pos){
-    var dotIndex = this.getDotIndex(state, output);
-
-    if(typeof dotIndex === 'number'){
-      this.setDecimals(state, output, pos, dotIndex, toFixed(state.right, precision, state.roundFn)[1]);
-    }
-  },
-  optStep: function(precision, optional, state, output, pos){
-    var dotIndex = this.getDotIndex(state, output);
-
-    if(dotIndex){
-      var decimals = toFixed(state.right, precision, state.roundFn)[1];
-
-      // Eliminate optional '0's from the right
-      if(decimals.length > 0){
-        for(var len = decimals.length, i = len - 1; i >= 0 && len - i <= optional; --i){
-          if(decimals[i] !== '0'){
-            break;
-          }
-        }
-        decimals = i > 0? decimals.substring(0, i+1) : null;
-      }
-
-      this.setDecimals(state, output, pos, dotIndex, decimals);
-    }
-  }
-};
-
-/*var abbrConsumer = {
-  token: 'a',
-  consume: function(state, input, pos){
-    var concrete = input[pos+1];
-    if(concrete){
-
-    } else {
-
-    }
-  },
-};*/
-
-function numbr(){}
-
-numbr.Numbr = Numbr;
-
-numbr.setCacheEnabled = function(enabled){
-  formatFn = enabled? formatWithCache : format;
+/**
+ * Enables or disables the format cache.
+ * By default every format is compiled into a series of transformation functions that are cached and reused every
+ * time {@link Numbr.format} is called.
+ *
+ * Disabling the cache may cause a significant performance hit and it is not recommended. Most applications will
+ * probably use just a handful of formats, so the memory overhead is non-existent.
+ *
+ * @param {boolean} enabled Whether to enable or disable the cache
+ */
+numbr.cacheEnabled = function(enabled){
+  compileFn = enabled? compileWithCache : compileFormat;
 };
 
 numbr.setDefaultConsumer = function(consumer){
@@ -392,6 +286,11 @@ numbr.setDefaultConsumer = function(consumer){
   defaultConsumers = [consumer];
 };
 
+/**
+ * Adds a consumer to the list of global consumers.
+ * Cosumers are used to translate the string format input into actual transforming steps.
+ * @param {ConsumerDefinition} consumer
+ */
 numbr.addConsumer = function(consumer){
   consumer.Id = ++autoId;
 
@@ -405,16 +304,54 @@ numbr.addConsumer = function(consumer){
   });
 };
 
+/**
+ * Comparison function used to sort consumers based on their priority property.
+ * @param {ConsumerDefinition} a
+ * @param {ConsumerDefinition} b
+ * @returns {number}
+ */
 numbr.consumerCompare = function(a, b){
   return (a.priority || 0) - (b.priority || 0);
 };
 
-numbr._noopConsumer = {
+/**
+ * A simple consumer that echoes back as many characters as possible in one step.
+ * This is the default consumer.
+ * @type {ConsumerDefinition}
+ */
+numbr.echoConsumer = {
+  consume: function(state, input, pos){
+    for(var i = pos+1, len = input.length; i < len; ++i){
+      if(fmtConsumers[input[i]]){
+        break;
+      }
+    }
+
+    return { step: this.step.bind(this, input.substring(pos, i)), consumed: i - pos - 1, weight: 1000 };
+  },
+  step: function(str, state, output, pos){
+    output[pos] = str;
+  }
+};
+
+/**
+ * A simple consumer that consumes the single character is given and does nothing else.
+ * You can set this consumer as the default by using {@link numbr.setDefaultConsumer}
+ * @type {ConsumerDefinition}
+ */
+numbr.noopConsumer = {
   consume: function(){
     return {};
   }
 };
 
-numbr.setDefaultConsumer(numbr._noopConsumer);
+// Initializes the default and standard consumers
+numbr.setDefaultConsumer(numbr.echoConsumer);
+consumers.map(numbr.addConsumer);
 
-[parenthesisConsumer, plusConsumer, intConsumer, sepConsumer, dotConsumer, decimalConsumer].map(numbr.addConsumer);
+// Access to useful types
+numbr.Numbr = Numbr;
+numbr.CompiledFormat = CompiledFormat;
+numbr.standardConsumers = consumers;
+
+module.exports = numbr;
