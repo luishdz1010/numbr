@@ -1,10 +1,10 @@
 {
   "name": "numbr",
-  "version": "0.0.1",
-  "description": "A faster number formatting library, based on Numeral.js",
+  "version": "0.0.2",
+  "description": "A fast number formatting library, based on Numeral.js",
   "main": "numbr.js",
   "scripts": {
-    "test": "./node_modules/.bin/mocha ./tests"
+    "test": "./node_modules/.bin/mocha ./tests --recursive"
   },
   "repository": {
     "type": "git",
