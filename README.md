@@ -5,7 +5,7 @@ numbr
 A simple, fast javascript library for formatting numbers. Based heavily on [Numeral.js](https://github.com/adamwdraper/Numeral-js/)
 
 # Example
-```
+```javascript
 var numbr = require('number');
 
 numbr(1000.25).format('0,0.0');
