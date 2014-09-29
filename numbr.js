@@ -11,7 +11,9 @@ var
   fmtConsumers = {},
   defaultConsumers,
   compileFn = compileWithCache,
-  formatCache = {};
+  formatCache = {},
+  languages = {},
+  globalLang = 'en';
 
 /**
  * A wrapper for numeral-like formatting
@@ -31,7 +33,7 @@ function Numbr(value){
  * @returns {string} Returns the formatted number
  */
 Numbr.prototype.format = function(fmt, roundFn){
-  return compileFn(fmt || defaultFormat).run(this.num, roundFn || Math.round);
+  return compileFn(fmt || defaultFormat).run(this.num, roundFn || Math.round, globalLang);
 };
 
 Numbr.prototype.valueOf = function(){
@@ -199,7 +201,7 @@ function CompiledFormat(steps, opts){
  * @param {function} roundFn A rounding function
  * @returns {string}
  */
-CompiledFormat.prototype.run = function(num, roundFn){
+CompiledFormat.prototype.run = function(num, roundFn, lang){
   if(num === 0 && zeroFormat){
     return zeroFormat;
   }
@@ -211,25 +213,13 @@ CompiledFormat.prototype.run = function(num, roundFn){
       right: num % 1,
       roundFn : roundFn,
       opts: this.opts,
-      pos: pos
+      pos: pos,
+      lang: languages[lang]
     },
     steps = this.steps,
     len = steps.length,
     i = 0,
     output = new Array(len);
-
-  state.lang = {
-    ordinal: function (number){
-      var b = number % 10;
-      return (~~(number % 100 / 10) === 1) ? 'th' :
-        (b === 1) ? 'st' :
-          (b === 2) ? 'nd' :
-            (b === 3) ? 'rd' : 'th';
-    },
-    currency: {
-      symbol: '$'
-    }
-  };
 
   for(; i < len; ++i){
     var step = steps[i];
@@ -266,6 +256,50 @@ numbr.zeroFormat = function(fmt){
 numbr.defaultFormat = function(fmt){
   defaultFormat = _.isString(fmt)? fmt : '0.0';
 };
+
+numbr.loadLang = function(langCode, langDef){
+  languages[langCode.toLowerCase()] = langDef;
+};
+
+numbr.getGlobalLang = function(){
+  return globalLang;
+};
+
+/**
+ * Sets the global language.
+ * @param langCode
+ */
+numbr.setGlobalLang = function(langCode){
+  langCode = langCode.toLowerCase();
+
+  if(!languages[langCode]){
+    throw new Error('Unknown language : ' + langCode);
+  }
+
+  globalLang = langCode;
+};
+
+/**
+ * Gets the global language, sets the global language or loads a language.
+ * If called with no arguments, returns the global language.
+ * If called with just the language code, it sets the global language.
+ * If called with both arguments, the language is just loaded.
+ *
+ * @param {string] [langCode] The language code
+ * @param {object} [langDef] A valid language definition
+ */
+numbr.language = function(langCode, langDef) {
+  if(!langCode) {
+    return globalLang;
+  }
+
+  if(langDef){
+    numbr.loadLang(langCode, langDef);
+  } else {
+    numbr.setGlobalLang(langCode);
+  }
+};
+
 
 /**
  * Enables or disables the format cache.
@@ -345,13 +379,37 @@ numbr.noopConsumer = {
   }
 };
 
+numbr.Numbr = Numbr;
+numbr.CompiledFormat = CompiledFormat;
+numbr.standardConsumers = consumers;
+
 // Initializes the default and standard consumers
 numbr.setDefaultConsumer(numbr.echoConsumer);
 consumers.map(numbr.addConsumer);
 
-// Access to useful types
-numbr.Numbr = Numbr;
-numbr.CompiledFormat = CompiledFormat;
-numbr.standardConsumers = consumers;
+numbr.loadLang('en', {
+  delimiters: {
+    thousands: ',',
+    decimal: '.'
+  },
+  abbreviations: {
+    thousand: 'k',
+    million: 'm',
+    billion: 'b',
+    trillion: 't'
+  },
+  ordinal: function(number) {
+    var b = number % 10;
+    return (~~(number % 100 / 10) === 1) ? 'th' :
+      (b === 1) ? 'st' :
+        (b === 2) ? 'nd' :
+          (b === 3) ? 'rd' : 'th';
+  },
+  currency: {
+    symbol: '$'
+  }
+});
+
+
 
 module.exports = numbr;
