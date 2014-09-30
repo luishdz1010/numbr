@@ -19,12 +19,13 @@ var
 
 /**
  * A wrapper for numeral-like formatting
- * @param value
+ * @param {number} value
+ * @param {string} [lang]
  * @constructor
  */
-function Numbr(value){
+function Numbr(value, lang){
   this.num = value;
-  this.lang = '';
+  this.lang = lang || '';
 }
 
 /**
@@ -36,7 +37,7 @@ function Numbr(value){
  * @returns {string} Returns the formatted number
  */
 Numbr.prototype.format = function(fmt, roundFn){
-  return compileFn(fmt || defaultFormat).run(this.num, roundFn || Math.round, this.lang || globalLang);
+  return compileFn(fmt || defaultFormat).run(this.num, roundFn, this.lang);
 };
 
 /**
@@ -227,8 +228,8 @@ CompiledFormat.prototype.run = function(num, roundFn, lang){
       right: num % 1,
       rightStr: '',
       optionalDot: false,
-      roundFn : roundFn,
-      lang: languages[lang],
+      roundFn : roundFn || Math.round,
+      lang: languages[lang || globalLang],
       opts: this.opts,
       pos: this.pos
     },
@@ -385,6 +386,8 @@ numbr.noopConsumer = new Consumer('', {
 
 numbr.Numbr = Numbr;
 numbr.CompiledFormat = CompiledFormat;
+numbr.Consumer = Consumer;
+numbr.Step = Step;
 numbr.standardConsumers = consumers;
 
 // Initializes the default and standard consumers

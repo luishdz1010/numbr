@@ -167,4 +167,16 @@ describe('Numbr#format', function(){
 
     checkValues(values);
   });
+
+  it('should echo non-format tokens', function(){
+    var values = [
+      [2342, 'cdefghijklmnpqrstuvwxyz', 'cdefghijklmnpqrstuvwxyz'],
+      [2341, 'cdefghijkl0,0.00mnpqrsuvwxyz', 'cdefghijkl2,341.00mnpqrsuvwxyz'],
+      [123, 'And the Answer is: 0[.][00]', 'And the Answer is: 123'],
+      [1234, '!"#&/=\\\'?¡¿_{}^|<>/', '!"#&/=\\\'?¡¿_{}^|<>/'],
+      [33.7, '(L0.0 ME) WIN $', 'L33.7 ME WIN $']
+    ];
+
+    checkValues(values);
+  });
 });
