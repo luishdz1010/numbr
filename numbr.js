@@ -247,10 +247,11 @@ CompiledFormat.prototype.run = function(num, roundFn, lang){
  * Function wrapper for creating new Numbr instances, it also has useful static methods to
  * control the global module behaviour.
  * @param {number} value
+ * @param {string} [lang]
  * @returns {Numbr}
  */
-function numbr(value){
-  return new Numbr(value);
+function numbr(value, lang){
+  return new Numbr(value, lang);
 }
 
 /**
