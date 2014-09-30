@@ -2,7 +2,9 @@
 
 var
   _ = require('lodash'),
-  consumers = require('./lib/consumers');
+  consumers = require('./lib/consumers'),
+  Consumer = consumers.Consumer,
+  Step = consumers.Step;
 
 var
   autoId = 0,
@@ -22,6 +24,7 @@ var
  */
 function Numbr(value){
   this.num = value;
+  this.lang = '';
 }
 
 /**
@@ -33,7 +36,16 @@ function Numbr(value){
  * @returns {string} Returns the formatted number
  */
 Numbr.prototype.format = function(fmt, roundFn){
-  return compileFn(fmt || defaultFormat).run(this.num, roundFn || Math.round, globalLang);
+  return compileFn(fmt || defaultFormat).run(this.num, roundFn || Math.round, this.lang || globalLang);
+};
+
+/**
+ * Sets the language for this Numbr.
+ * The provided language must be already loaded via {@link numbr.loadLang}.
+ * @param lang The language code
+ */
+Numbr.prototype.setLang = function(lang){
+  this.lang = lang;
 };
 
 Numbr.prototype.valueOf = function(){
@@ -76,31 +88,25 @@ function compileFormat(fmt){
   var
     state = new ConsumerState(),
     steps = [],
-    opts = {
-      pos: {}
-    };
+    opts = {},
+    pos = {};
+
+  opts.pos = pos;
 
   for(var i = 0, len = fmt.length; i < len; ++i){
     var
       char = fmt[i],
       consumers = fmtConsumers[char] || defaultConsumers,
-      res = consumeInput(consumers, state, fmt, i);
-
-    if(!res){
-      res = consumeInput(defaultConsumers, state, fmt, i);
-    }
+      res = consumeInput(consumers, state, fmt, i) || consumeInput(defaultConsumers, state, fmt, i);
 
     if(res.consumed){
       i += res.consumed;
     }
 
     if(res.step){
-      res.step.consumer = res.consumer;
-      res.step.consumerId = res.consumer.Id;
-
       // Cache this step position following a natural order, so that the final output corresponds
       // to the input string and not the internal weight order
-      opts.pos[res.consumer.Id] = steps.push(res) - 1;
+      pos[res.step.consumerId] = steps.push(res) - 1;
 
       if(res.opts){
         _.extend(opts, res.opts);
@@ -113,18 +119,24 @@ function compileFormat(fmt){
     .pluck('step')
     .value();
 
-  return new CompiledFormat(steps, opts);
+  var sortedPos = new Array(steps.length);
+
+  for(i = 0, len = steps.length; i < len; ++i){
+    sortedPos[i] = pos[steps[i].consumerId];
+  }
+
+  return new CompiledFormat(steps, opts, sortedPos);
 }
 
 /**
  * Finds an appropriate consumer object to swallow the current input cursor.
  *
  * @private
- * @param {ConsumerDefinition[]} consumers An array of consumers
+ * @param {Consumer[]} consumers An array of consumers
  * @param {ConsumerState} state A consumer state object
  * @param {string} fmt The format string
  * @param {number} pos The format string cursor
- * @returns {StepDefinition|null} Returns an appropriate step definition given by one of the consumers on the
+ * @returns {Step|null} Returns an appropriate step definition given by one of the consumers on the
  * supplied array, if any
  */
 function consumeInput(consumers, state, fmt, pos){
@@ -135,7 +147,6 @@ function consumeInput(consumers, state, fmt, pos){
 
     if(res){
       state.incConsumed(consumer.Id);
-      res.consumer = consumer;
       return res;
     }
   }
@@ -183,23 +194,24 @@ ConsumerState.prototype.timesConsumed = function(id){
 
 /**
  * A wrapper object for compiled formats.
- * @param {StepFunction[]} steps An array of step functions to be called during {@link CompiledFormat#run}
+ * @param {Step[]} steps An array of step functions to be called during {@link CompiledFormat#run}
  * @param {object} opts A options object that will be passed to every step function as part of the run state
+ * @param {number[]} sortedPos The an array output position indexes of each step in steps
  * @constructor
  */
-function CompiledFormat(steps, opts){
+function CompiledFormat(steps, opts, sortedPos){
   this.steps = steps;
   this.opts = opts;
   this.pos = opts.pos;
-
-  delete opts.pos;
+  this.sortedPos = sortedPos;
 }
 
 /**
  * Runs all the transformation step functions using the given number and rounding function.
  * @param num The number to format
  * @param {function} roundFn A rounding function
- * @returns {string}
+ * @param {string} lang The language code
+ * @returns {string} The formatted number
  */
 CompiledFormat.prototype.run = function(num, roundFn, lang){
   if(num === 0 && zeroFormat){
@@ -207,23 +219,23 @@ CompiledFormat.prototype.run = function(num, roundFn, lang){
   }
 
   var
-    pos = this.pos,
+    len = this.steps.length,
+    i = 0,
     state = {
       num: num,
+      signPos: -1,
       right: num % 1,
+      rightStr: '',
+      optionalDot: false,
       roundFn : roundFn,
+      lang: languages[lang],
       opts: this.opts,
-      pos: pos,
-      lang: languages[lang]
+      pos: this.pos
     },
-    steps = this.steps,
-    len = steps.length,
-    i = 0,
     output = new Array(len);
 
   for(; i < len; ++i){
-    var step = steps[i];
-    step(state, output, pos[step.consumerId]);
+    this.steps[i](state, output, this.sortedPos[i]);
   }
 
   return output.join('');
@@ -285,7 +297,7 @@ numbr.setGlobalLang = function(langCode){
  * If called with just the language code, it sets the global language.
  * If called with both arguments, the language is just loaded.
  *
- * @param {string] [langCode] The language code
+ * @param {string} [langCode] The language code
  * @param {object} [langDef] A valid language definition
  */
 numbr.language = function(langCode, langDef) {
@@ -323,37 +335,24 @@ numbr.setDefaultConsumer = function(consumer){
 /**
  * Adds a consumer to the list of global consumers.
  * Cosumers are used to translate the string format input into actual transforming steps.
- * @param {ConsumerDefinition} consumer
+ * @param {Consumer} consumer
  */
 numbr.addConsumer = function(consumer){
-  consumer.Id = ++autoId;
+  consumer.setId(++autoId);
 
   consumer.token.split('').forEach(function(char){
-    var consumerArr = fmtConsumers[char];
-    if(!consumerArr){
-      consumerArr = fmtConsumers[char] = [];
-    }
+    var consumerArr = fmtConsumers[char] || [];
     consumerArr.push(consumer);
-    consumerArr.sort(numbr.consumerCompare);
+    fmtConsumers[char] = _.sortBy(consumerArr, 'priority');
   });
-};
-
-/**
- * Comparison function used to sort consumers based on their priority property.
- * @param {ConsumerDefinition} a
- * @param {ConsumerDefinition} b
- * @returns {number}
- */
-numbr.consumerCompare = function(a, b){
-  return (a.priority || 0) - (b.priority || 0);
 };
 
 /**
  * A simple consumer that echoes back as many characters as possible in one step.
  * This is the default consumer.
- * @type {ConsumerDefinition}
+ * @type {Consumer}
  */
-numbr.echoConsumer = {
+numbr.echoConsumer = new Consumer('', {
   consume: function(state, input, pos){
     for(var i = pos+1, len = input.length; i < len; ++i){
       if(fmtConsumers[input[i]]){
@@ -361,23 +360,28 @@ numbr.echoConsumer = {
       }
     }
 
-    return { step: this.step.bind(this, input.substring(pos, i)), consumed: i - pos - 1, weight: 1000 };
-  },
-  step: function(str, state, output, pos){
-    output[pos] = str;
+    var
+      str = input.substring(pos, i),
+      fn = function(state, output, pos){
+        output[pos] = str;
+      };
+
+    fn.consumerId = ++autoId;
+
+    return new Step(fn, 2000, null, i - pos - 1);
   }
-};
+});
 
 /**
  * A simple consumer that consumes the single character is given and does nothing else.
  * You can set this consumer as the default by using {@link numbr.setDefaultConsumer}
- * @type {ConsumerDefinition}
+ * @type {Consumer}
  */
-numbr.noopConsumer = {
+numbr.noopConsumer = new Consumer('', {
   consume: function(){
     return {};
   }
-};
+});
 
 numbr.Numbr = Numbr;
 numbr.CompiledFormat = CompiledFormat;
@@ -409,7 +413,5 @@ numbr.loadLang('en', {
     symbol: '$'
   }
 });
-
-
 
 module.exports = numbr;
