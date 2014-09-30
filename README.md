@@ -10,7 +10,7 @@ Soon. In the meantime, all format strings from http://numeraljs.com/ work as exp
 
 # Examples
 ```javascript
-var numbr = require('number');
+var numbr = require('numbr');
 
 numbr(1000.25).format('0,0.0');
 // 1,000.3
