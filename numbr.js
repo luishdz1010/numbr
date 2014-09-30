@@ -27,7 +27,7 @@ var
  */
 function Numbr(value, lang){
   this.num = value;
-  this.lang = lang || '';
+  this.lang = (lang || '').toLowerCase();
 }
 
 /**
@@ -309,7 +309,7 @@ numbr.defaultFormat = function(fmt){
  * @param {object} langDef
  */
 numbr.loadLang = function(langCode, langDef){
-  languages[langCode] = langDef;
+  languages[langCode.toLowerCase()] = langDef;
 };
 
 /**
