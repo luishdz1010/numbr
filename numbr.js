@@ -18,7 +18,9 @@ var
   globalLang = 'en';
 
 /**
- * A wrapper for numeral-like formatting
+ * A wrapper for numeral-like formatting.
+ * Stores the given value for further formatting.
+ *
  * @param {number} value
  * @param {string} [lang]
  * @constructor
@@ -32,9 +34,9 @@ function Numbr(value, lang){
  * Formats the wrapped value according to fmt.
  * By default, the format is compiled into a series of transformations and then cached globally, if you'd like to
  * disable the caching feature, use {@link numbr.cacheEnabled}.
- * @param {string} fmt
+ * @param {string} [fmt=defaultFormat]
  * @param {function} [roundFn=Math.round]
- * @returns {string} Returns the formatted number
+ * @returns {string} the formatted number
  */
 Numbr.prototype.format = function(fmt, roundFn){
   return compileFn(fmt || defaultFormat).run(this.num, roundFn, this.lang);
@@ -43,26 +45,41 @@ Numbr.prototype.format = function(fmt, roundFn){
 /**
  * Sets the language for this Numbr.
  * The provided language must be already loaded via {@link numbr.loadLang}.
- * @param lang The language code
+ * @param lang the language code
  */
 Numbr.prototype.setLang = function(lang){
   this.lang = lang;
 };
 
+/**
+ * @returns {number}
+ */
 Numbr.prototype.valueOf = function(){
   return this.num;
 };
 
+/**
+ * Access to the wrapped value
+ * @returns {number}
+ */
 Numbr.prototype.value = function(){
-  return this.value;
+  return this.num;
 };
 
+/**
+ * Sets the wrapped value
+ * @param {number} num
+ */
 Numbr.prototype.set = function(num){
   this.num = num;
 };
 
+/**
+ * Returns a new Numbr object with the same value and language as this Numbr.
+ * @returns {Numbr}
+ */
 Numbr.prototype.clone = function(){
-  return new Numbr(this.num);
+  return new Numbr(this.num, this.lang);
 };
 
 /**
@@ -195,9 +212,11 @@ ConsumerState.prototype.timesConsumed = function(id){
 
 /**
  * A wrapper object for compiled formats.
+ * Objects of this class should not be created directly. Use {@link numbr.compile} instead.
+ *
  * @param {Step[]} steps An array of step functions to be called during {@link CompiledFormat#run}
  * @param {object} opts A options object that will be passed to every step function as part of the run state
- * @param {number[]} sortedPos The an array output position indexes of each step in steps
+ * @param {number[]} sortedPos An array of output position indexes of each step in steps
  * @constructor
  */
 function CompiledFormat(steps, opts, sortedPos){
@@ -209,10 +228,11 @@ function CompiledFormat(steps, opts, sortedPos){
 
 /**
  * Runs all the transformation step functions using the given number and rounding function.
+ *
  * @param num The number to format
  * @param {function} roundFn A rounding function
  * @param {string} lang The language code
- * @returns {string} The formatted number
+ * @returns {string} the formatted number
  */
 CompiledFormat.prototype.run = function(num, roundFn, lang){
   if(num === 0 && zeroFormat){
@@ -242,10 +262,12 @@ CompiledFormat.prototype.run = function(num, roundFn, lang){
   return output.join('');
 };
 
-
 /**
  * Function wrapper for creating new Numbr instances, it also has useful static methods to
  * control the global module behaviour.
+ *
+ * All classes can be accessed via numbr.ClassName, e.g. numbr.Numbr, numbr.CompiledFormat, etc.
+ * @namespace
  * @param {number} value
  * @param {string} [lang]
  * @returns {Numbr}
@@ -263,18 +285,37 @@ numbr.compile = function(fmt){
   return compileFn(fmt);
 };
 
+/**
+ * Sets the global zero format.
+ * If defined, the zero format is used as the outout of {@link Numbr#format} whenever the wrapped value === 0.
+ * @param fmt
+ */
 numbr.zeroFormat = function(fmt){
   zeroFormat = _.isString(fmt)? fmt : null;
 };
 
+/**
+ * Sets the default format.
+ * The default format is used if {@link Numbr#format} is called without arguments. By default, the format is '0.0'.
+ * @param {string} fmt
+ */
 numbr.defaultFormat = function(fmt){
   defaultFormat = _.isString(fmt)? fmt : '0.0';
 };
 
+/**
+ * Stores the given language definition with the code langCode.
+ * @param {string} langCode
+ * @param {object} langDef
+ */
 numbr.loadLang = function(langCode, langDef){
-  languages[langCode.toLowerCase()] = langDef;
+  languages[langCode] = langDef;
 };
 
+/**
+ * Access the global language code.
+ * @returns {string}
+ */
 numbr.getGlobalLang = function(){
   return globalLang;
 };
@@ -314,11 +355,10 @@ numbr.language = function(langCode, langDef) {
   }
 };
 
-
 /**
  * Enables or disables the format cache.
  * By default every format is compiled into a series of transformation functions that are cached and reused every
- * time {@link Numbr.format} is called.
+ * time {@link Numbr#format} is called.
  *
  * Disabling the cache may cause a significant performance hit and it is not recommended. Most applications will
  * probably use just a handful of formats, so the memory overhead is non-existent.
@@ -329,6 +369,12 @@ numbr.cacheEnabled = function(enabled){
   compileFn = enabled? compileWithCache : compileFormat;
 };
 
+/**
+ * Sets the default consumer.
+ * The default consumer is used when no other consumer is able to consume a slice of the input format string.
+ * By default, this is {@link numbr.echoConsumer}.
+ * @param {Consumer} consumer
+ */
 numbr.setDefaultConsumer = function(consumer){
   consumer.Id = ++autoId;
   defaultConsumers = [consumer];
@@ -336,7 +382,7 @@ numbr.setDefaultConsumer = function(consumer){
 
 /**
  * Adds a consumer to the list of global consumers.
- * Cosumers are used to translate the string format input into actual transforming steps.
+ * Consumers are used to translate the string format input into actual transforming steps.
  * @param {Consumer} consumer
  */
 numbr.addConsumer = function(consumer){
