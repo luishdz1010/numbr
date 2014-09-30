@@ -1,6 +1,6 @@
 {
   "name": "numbr",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "A fast number formatting library, based on Numeral.js",
   "main": "numbr.js",
   "scripts": {
