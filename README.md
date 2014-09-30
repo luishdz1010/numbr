@@ -8,7 +8,7 @@ A simple, fast javascript library for formatting numbers. Based heavily on [Nume
 # Formatting options
 Soon. In the meantime, all format strings from http://numeraljs.com/ work as expected.
 
-# Example
+# Examples
 ```javascript
 var numbr = require('number');
 
